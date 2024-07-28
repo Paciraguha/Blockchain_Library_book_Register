@@ -2,7 +2,6 @@ import Array "mo:base/Array";
 import Time "mo:base/Time";
 
 actor {
-
   // Define the Book type
   public type Book = {
     id : Nat;
@@ -10,7 +9,7 @@ actor {
     author : Text;
     publicationDate : Text;
     isBorrowed : Bool;
-    rentUntil : ?Time.Time; // Add the rentUntil field
+    rentUntil : ?Time.Time;
   };
 
   // State variables
@@ -22,58 +21,63 @@ actor {
     return books;
   };
 
-  // Function to add a new book
-  public func addBook(title : Text, author : Text, publicationDate : Text) : async () {
-    let newBook : Book = {
-      id = nextId;
+  // Function to create a new book
+  func createBook(id: Nat, title: Text, author: Text, publicationDate: Text, isBorrowed: Bool, rentUntil: ?Time.Time) : Book {
+    {
+      id = id;
       title = title;
       author = author;
       publicationDate = publicationDate;
-      isBorrowed = false;
-      rentUntil = null; // Initialize rentUntil as null
-    };
+      isBorrowed = isBorrowed;
+      rentUntil = rentUntil;
+    }
+  }
+
+  // Function to add a new book
+  public func addBook(title : Text, author : Text, publicationDate : Text) : async () {
+    let newBook = createBook(nextId, title, author, publicationDate, false, null);
     books := Array.append<Book>(books, [newBook]);
     nextId := nextId + 1;
   };
 
   // Function to delete a book by id
   public func deleteBook(id : Nat) : async () {
-    books := Array.filter<Book>(books, func(book : Book) : Bool {
+    let filteredBooks = Array.filter<Book>(books, func(book : Book) : Bool {
       book.id != id
     });
+    if (Array.size(filteredBooks) == Array.size(books)) {
+      // Handle book not found scenario
+      throw Error.reject("Book not found");
+    } else {
+      books := filteredBooks;
+    }
   };
 
   // Function to update a book by id
   public func updateBook(id : Nat, title : Text, author : Text, publicationDate : Text) : async () {
+    var bookFound = false;
     books := Array.map<Book, Book>(books, func(book : Book) : Book {
       if (book.id == id) {
-        return {
-          id = book.id;
-          title = title;
-          author = author;
-          publicationDate = publicationDate;
-          isBorrowed = book.isBorrowed; // Keep the current borrow status
-          rentUntil = book.rentUntil; // Keep the current rentUntil date
-        };
+        bookFound := true;
+        return createBook(book.id, title, author, publicationDate, book.isBorrowed, book.rentUntil);
       } else {
         return book;
       }
     });
+    if (not bookFound) {
+      // Handle book not found scenario
+      throw Error.reject("Book not found");
+    }
   };
 
   // Function to borrow a book by id
   public func borrowBook(id : Nat, returnDate : Time.Time) : async () {
+    var bookFound = false;
     books := Array.map<Book, Book>(books, func(book : Book) : Book {
       if (book.id == id) {
-        if (not book.isBorrowed) {  // Use not for negation
-          return {
-            id = book.id;
-            title = book.title;
-            author = book.author;
-            publicationDate = book.publicationDate;
-            isBorrowed = true;
-            rentUntil = ?returnDate; // Set rentUntil date
-          };
+        bookFound := true;
+        if (not book.isBorrowed) {
+          return createBook(book.id, book.title, book.author, book.publicationDate, true, ?returnDate);
         } else {
           return book;
         }
@@ -81,21 +85,20 @@ actor {
         return book;
       }
     });
+    if (not bookFound) {
+      // Handle book not found scenario
+      throw Error.reject("Book not found or already borrowed");
+    }
   };
 
   // Function to return a book by id
   public func returnBook(id : Nat) : async () {
+    var bookFound = false;
     books := Array.map<Book, Book>(books, func(book : Book) : Book {
       if (book.id == id) {
+        bookFound := true;
         if (book.isBorrowed) {
-          return {
-            id = book.id;
-            title = book.title;
-            author = book.author;
-            publicationDate = book.publicationDate;
-            isBorrowed = false;
-            rentUntil = null; // Clear rentUntil date
-          };
+          return createBook(book.id, book.title, book.author, book.publicationDate, false, null);
         } else {
           return book;
         }
@@ -103,6 +106,9 @@ actor {
         return book;
       }
     });
+    if (not bookFound) {
+      // Handle book not found scenario
+      throw Error.reject("Book not found or not borrowed");
+    }
   };
-
 };
