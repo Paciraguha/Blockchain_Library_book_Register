@@ -12,7 +12,6 @@ function App() {
   const [currentBook, setCurrentBook] = useState(null);
   const [notification, setNotification] = useState('');
 
-  // only need to validate date and pretty much done
   const signIn = async () => {
     const authClient = window.auth.client;
     // const internetIdentityUrl = process.env.NODE_ENV === 'production'
