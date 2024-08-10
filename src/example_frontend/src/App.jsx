@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { AuthClient } from "@dfinity/auth-client";
-import { Actor, HttpAgent } from "@dfinity/agent";
-import { example_backend } from 'declarations/example_backend';
 import './index.scss';
-
+import { IDENTITY_PROVIDER } from "./utils/auth"
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [principal, setPrincipal] = useState(null);
+  const principal = window.auth.principal;
+  const isAuthenticated = window.auth.isAuthenticated;
   const [books, setBooks] = useState([]);
   const [showAddBookForm, setShowAddBookForm] = useState(false);
   const [showUpdateBookForm, setShowUpdateBookForm] = useState(false);
@@ -15,61 +12,30 @@ function App() {
   const [currentBook, setCurrentBook] = useState(null);
   const [notification, setNotification] = useState('');
 
-  const authClientPromise = AuthClient.create();
-
   const signIn = async () => {
-    const authClient = await authClientPromise;
-    const internetIdentityUrl = process.env.NODE_ENV === 'production'
-      ? undefined
-      : 'http://localhost:4943/?canisterId=${process.env.INTERNET_IDENTITY_CANISTER_ID}';
-
+    const authClient = window.auth.client;
+    // const internetIdentityUrl = process.env.NODE_ENV === 'production'
+    //   ? undefined
+    //   : IDENTITY_PROVIDER
     await new Promise((resolve) => {
       authClient.login({
-        identityProvider: internetIdentityUrl,
+        identityProvider: IDENTITY_PROVIDER,
         onSuccess: () => resolve(undefined),
       });
     });
-
-    const identity = authClient.getIdentity();
-    updateIdentity(identity);
-    setIsLoggedIn(true);
+    window.location.reload();
   };
 
   const signOut = async () => {
-    const authClient = await authClientPromise;
+    const authClient = await window.auth.client;
     await authClient.logout();
-    updateIdentity(null);
+    window.location.reload();
   };
 
-  const updateIdentity = (identity) => {
-    if (identity) {
-      setPrincipal(identity.getPrincipal());
-      const agent = new HttpAgent();
-      const actor = Actor.createActor(example_backend, { agent: agent });
-      example_backend.setActor(actor);
-    } else {
-      setPrincipal(null);
-      example_backend.setActor(null);
-    }
-  };
-
-  useEffect(() => {
-    const checkLoginStatus = async () => {
-      const authClient = await authClientPromise;
-      const isAuthenticated = await authClient.isAuthenticated();
-      setIsLoggedIn(isAuthenticated);
-      if (isAuthenticated) {
-        const identity = authClient.getIdentity();
-        updateIdentity(identity);
-      }
-    };
-
-    checkLoginStatus();
-  }, []);
 
   const fetchBooks = async () => {
     try {
-      const booksList = await example_backend.getBooks();
+      const booksList = await window.canister.backend.getBooks();
       console.log("Fetched books:", booksList);
       setBooks(booksList);
     } catch (error) {
@@ -82,7 +48,7 @@ function App() {
     console.log("Submitting book:", newBook);
 
     try {
-      await example_backend.addBook(newBook.title, newBook.author, newBook.publicationDate);
+      await window.canister.backend.addBook(newBook.title, newBook.author, newBook.publicationDate);
       console.log("Book added successfully");
       setNotification('Book Registered successfully!');
       setTimeout(() => setNotification(''), 3000); // Clear notification after 3 seconds
@@ -99,7 +65,7 @@ function App() {
     console.log("Updating book:", currentBook);
 
     try {
-      await example_backend.updateBook(currentBook.id, currentBook.title, currentBook.author, currentBook.publicationDate);
+      await window.canister.backend.updateBook(currentBook.id, currentBook.title, currentBook.author, currentBook.publicationDate);
       console.log("Book updated successfully");
       setCurrentBook(null);
       setShowUpdateBookForm(false);
@@ -114,7 +80,7 @@ function App() {
     if (!confirmDelete) return;
 
     try {
-      await example_backend.deleteBook(bookId);
+      await window.canister.backend.deleteBook(bookId);
       console.log("Book deleted successfully");
       fetchBooks();
     } catch (error) {
@@ -124,15 +90,20 @@ function App() {
 
   const handleBorrowBook = async (bookId) => {
     const returnDateStr = prompt("Please enter the return date (YYYY-MM-DD):");
-    if (!returnDateStr) {
-      setNotification('Borrowing canceled.');
+    if (!returnDateStr.trim()) {
+      setNotification('Borrowing failed. Enter a valid date!');
       setTimeout(() => setNotification(''), 3000);
       return;
     }
 
     try {
       const returnDate = new Date(returnDateStr).getTime() * 1000000; // Convert to nanoseconds
-      await example_backend.borrowBook(bookId, returnDate);
+      if((new Date().getTime() * 1000000) >= returnDate){
+        setNotification('Borrowing failed. Please enter a valid future date.');
+        setTimeout(() => setNotification(''), 3000);
+        return;
+      }
+      await window.canister.backend.borrowBook(bookId, returnDate);
       console.log("Book borrowed successfully");
       setNotification('Book borrowed successfully!');
       setTimeout(() => setNotification(''), 3000); // Clear notification after 3 seconds
@@ -146,7 +117,7 @@ function App() {
 
   const handleReturnBook = async (bookId) => {
     try {
-      await example_backend.returnBook(bookId);
+      await window.canister.backend.returnBook(bookId);
       console.log("Book returned successfully");
       setNotification('Book returned successfully!');
       setTimeout(() => setNotification(''), 3000); // Clear notification after 3 seconds
@@ -182,13 +153,19 @@ function App() {
     setShowUpdateBookForm(false); // Close update form if open
   };
 
+  const handleShowAddBook = () => {
+      setShowAddBookForm(true)
+      setShowUpdateBookForm(false);
+      setShowBookDetails(false); // Close details view if open
+  }
+
   return (
     <main>
       <h1>Welcome to Library Book Register System</h1>
-      {isLoggedIn ? (
+      {isAuthenticated ? (
         <>
           <button onClick={signOut}>Sign Out</button> &nbsp;&nbsp;
-          <button onClick={() => setShowAddBookForm(true)}>Add New Book</button> &nbsp;&nbsp;
+          <button onClick={handleShowAddBook}>Add New Book</button> &nbsp;&nbsp;
           <button onClick={handleViewBooks}>View Books</button>
           <h2>Books Registered in Library are: ({books.length})</h2> {/* Display the count of books */}
           {notification && <p>{notification}</p>} {/* Display notification if present */}
@@ -209,13 +186,15 @@ function App() {
                     <td>{book.title}</td>
                     <td>{book.author}</td>
                     <td>{book.publicationDate}</td>
-                    <td>{book.rentUntil ? new Date(Number(book.rentUntil) / 1000000).toLocaleDateString() : 'N/A'}</td>
+                    {/* Option types are converted into arrays on the front-end where an empty array represents null */}
+                    <td>{book.rentUntil.length ? new Date(Number(book.rentUntil) / 1000000).toLocaleDateString() : 'N/A'}</td>
                     <td>
                       <button onClick={() => handleViewBook(book)}>View</button>&nbsp;&nbsp;
-                      <button onClick={() => handleEditBook(book)}>Edit</button>&nbsp;&nbsp;
-                      <button onClick={() => handleDeleteBook(book.id)}>Delete</button>&nbsp;&nbsp;
-                      <button onClick={() => handleBorrowBook(book.id)}>Borrow</button>&nbsp;&nbsp;
-                      <button onClick={() => handleReturnBook(book.id)}>Return</button>
+                      {book.principal.toString() === principal.toText() ? <>
+                        <button onClick={() => handleEditBook(book)}>Edit</button>&nbsp;&nbsp;
+                        <button onClick={() => handleDeleteBook(book.id)}>Delete</button>&nbsp;&nbsp;</> : ""}
+                      {book.principal.toString() === principal.toText() || book.rentUntil.length ? "" : <><button onClick={() => handleBorrowBook(book.id)}>Borrow</button>&nbsp;&nbsp;</>}
+                      {book.borrowedBy.length && book.borrowedBy[0].toString() == principal.toText() ? <button onClick={() => handleReturnBook(book.id)}>Return</button> : ""}
                     </td>
                   </tr>
                 ))}
